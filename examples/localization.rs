@@ -3,16 +3,16 @@ use klask::{Localization, Settings};
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
-#[clap(name = "App name")]
+#[command(name = "App name")]
 pub struct LocalizationExample {
     required_field: String,
-    #[clap(long)]
+    #[arg(long)]
     optional_field: Option<String>,
-    #[clap(long, default_value = "default value")]
+    #[arg(long, default_value = "default value")]
     field_with_default: String,
-    #[clap(long, parse(from_os_str), value_hint = ValueHint::AnyPath)]
+    #[arg(long, value_hint = ValueHint::AnyPath)]
     native_path_picker: Option<PathBuf>,
-    #[clap(short, multiple_occurrences(true))]
+    #[arg(long)]
     multiple_values: Vec<String>,
 }
 
@@ -23,7 +23,10 @@ fn main() {
     settings.enable_working_dir = Some("Additional working dir description!".into());
     settings.localization = polish_localization_exaple();
 
-    klask::run_derived::<LocalizationExample, _>(settings, |_| {})
+    #[cfg(not(target_arch = "wasm32"))]
+    klask::run_derived_native::<LocalizationExample, _>(settings, |_| {});
+    #[cfg(target_arch = "wasm32")]
+    klask::run_derived_web::<LocalizationExample, _>(settings, |_| async {});
 }
 
 fn polish_localization_exaple() -> Localization {

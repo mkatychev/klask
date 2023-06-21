@@ -1,5 +1,9 @@
+#[cfg(not(target_arch = "wasm32"))]
 use crate::{ExecutionError, CHILD_APP_ENV_VAR};
 use eframe::egui;
+#[cfg(target_arch = "wasm32")]
+use std::{fmt::Debug, future::Future, pin::Pin, task::Poll};
+#[cfg(not(target_arch = "wasm32"))]
 use std::{
     fs::File,
     io::{BufRead, BufReader, Read, Write},
@@ -9,11 +13,26 @@ use std::{
     thread,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug)]
 pub struct ChildApp {
     child: Child,
     stdout: Option<Receiver<Option<String>>>,
     stderr: Option<Receiver<Option<String>>>,
+}
+
+#[cfg(target_arch = "wasm32")]
+pub struct ChildApp {
+    ctx: egui::Context,
+    fut: Pin<Box<dyn Future<Output = ()>>>,
+}
+
+// TODO fix this impl to something better.
+#[cfg(target_arch = "wasm32")]
+impl Debug for ChildApp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChildApp").field("fut", &"TODO").finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -22,6 +41,36 @@ pub enum StdinType {
     Text(String),
 }
 
+#[cfg(target_arch = "wasm32")]
+impl ChildApp {
+    pub fn poll(&mut self) -> Poll<()> {
+        let poll_result = self
+            .fut
+            .as_mut()
+            .poll(&mut futures::task::Context::from_waker(
+                futures::task::noop_waker_ref(),
+            ));
+        // Request repaint after polling
+        self.ctx.request_repaint();
+        poll_result
+    }
+
+    pub fn read(&mut self) -> String {
+        todo!()
+    }
+
+    pub fn new<Fut>(ctx: egui::Context, fut: Fut) -> Self
+    where
+        Fut: Future<Output = ()> + 'static,
+    {
+        ChildApp {
+            ctx,
+            fut: Box::pin(fut),
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 impl ChildApp {
     pub fn run(
         args: Vec<String>,
@@ -141,6 +190,7 @@ impl ChildApp {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Drop for ChildApp {
     fn drop(&mut self) {
         self.kill();

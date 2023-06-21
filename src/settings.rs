@@ -24,7 +24,7 @@ pub struct Settings {
     /// Pass an empty String for no description.
     pub enable_working_dir: Option<String>,
     /// Pass a custom font to be used in the GUI.
-    /// ```ignore
+    /// ```compile_fail
     /// let mut settings = Settings::default();
     /// settings.custom_font = Some(Cow::Borrowed(include_bytes!(r"FONT_PATH")));
     /// ```
