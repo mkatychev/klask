@@ -15,10 +15,10 @@ use std::io::Write;
 /// If the description is not static or you need to use the same description
 /// multiple times, use [`progress_bar_with_id`].
 /// ```no_run
-/// # use clap::{App, Arg};
+/// # use clap::Command;
 /// # use klask::Settings;
 /// fn main() {
-///     klask::run_app(App::new("Example"), Settings::default(), |matches| {
+///     klask::run_app_native(Command::new("Example"), Settings::default(), |matches| {
 ///         for i in 0..=100 {
 ///             klask::output::progress_bar("Static description", i as f32 / 100.0);
 ///         }
@@ -35,10 +35,10 @@ pub fn progress_bar(description: &str, value: f32) {
 /// Value is a f32 between 0 and 1.
 /// Id is any hashable value that uniquely identifies a progress bar.
 /// ```no_run
-/// # use clap::{App, Arg};
+/// # use clap::Command;
 /// # use klask::Settings;
 /// fn main() {
-///     klask::run_app(App::new("Example"), Settings::default(), |matches| {
+///     klask::run_app_native(Command::new("Example"), Settings::default(), |matches| {
 ///         for i in 0..=100 {
 ///             klask::output::progress_bar_with_id(
 ///                 "Progress",
@@ -107,15 +107,17 @@ impl Widget for &mut Output {
                 // View
                 ui.vertical(|ui| {
                     if ui.button("Copy output").clicked() {
-                        ui.ctx().output().copied_text = output
-                            .iter()
-                            .map(|(_, o)| match o {
-                                OutputType::Text(text) => text,
-                                OutputType::ProgressBar(text, _) => text,
-                            })
-                            .flat_map(|text| cansi::v3::categorise_text(text))
-                            .map(|slice| slice.text)
-                            .collect::<String>();
+                        ui.ctx().output_mut(|p| {
+                            p.copied_text = output
+                                .iter()
+                                .map(|(_, o)| match o {
+                                    OutputType::Text(text) => text,
+                                    OutputType::ProgressBar(text, _) => text,
+                                })
+                                .flat_map(|text| cansi::v3::categorise_text(text))
+                                .map(|slice| slice.text)
+                                .collect::<String>()
+                        });
                     }
 
                     for (_, o) in output {
@@ -151,9 +153,9 @@ fn send_message(data: &[&str]) {
     let stdout = std::io::stdout();
     let mut lock = stdout.lock();
     for d in data {
-        write!(&mut lock, "{}{}", MAGIC, d).unwrap();
+        write!(&mut lock, "{MAGIC}{d}").unwrap();
     }
-    writeln!(&mut lock, "{}", MAGIC).unwrap();
+    writeln!(&mut lock, "{MAGIC}").unwrap();
 }
 
 impl OutputType {
@@ -162,7 +164,7 @@ impl OutputType {
     pub fn send(self, id: u64) {
         // Make sure to get rid of any newlines
         match self {
-            Self::Text(s) => print!("{}", s),
+            Self::Text(s) => print!("{s}"),
             Self::ProgressBar(desc, value) => send_message(&[
                 &id.to_string(),
                 Self::PROGRESS_BAR_STR,

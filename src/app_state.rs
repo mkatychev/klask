@@ -1,10 +1,10 @@
 use crate::{arg_state::ArgState, settings::Localization};
 use clap::Command;
 use eframe::egui::{widgets::Widget, Grid, Response, Ui};
-use inflector::Inflector;
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
+/// App state
 #[derive(Debug, Clone)]
 pub struct AppState<'s> {
     id: Uuid,
@@ -15,6 +15,7 @@ pub struct AppState<'s> {
 }
 
 impl<'s> AppState<'s> {
+    /// [`AppState`] constructor
     pub fn new(app: &Command, localization: &'s Localization) -> Self {
         let args = app
             .get_arguments()
@@ -29,7 +30,7 @@ impl<'s> AppState<'s> {
 
         AppState {
             id: Uuid::new_v4(),
-            about: app.get_about().map(String::from),
+            about: app.get_about().map(|v| v.to_string()),
             args,
             subcommands,
             current: app
@@ -39,6 +40,7 @@ impl<'s> AppState<'s> {
         }
     }
 
+    /// Apply [`ArgState<'_>::update_validation_error`] to self args recursively.
     pub fn update_validation_error(&mut self, name: &str, message: &str) {
         for arg in &mut self.args {
             arg.update_validation_error(name, message);
@@ -52,6 +54,7 @@ impl<'s> AppState<'s> {
         }
     }
 
+    /// Apply [`ArgState<'_>::get_cmd_args`] to self args recursively and push them all to the `args` parameter.
     pub fn get_cmd_args(&self, mut args: Vec<String>) -> Result<Vec<String>, String> {
         for arg in &self.args {
             args = arg.get_cmd_args(args)?;
@@ -92,11 +95,7 @@ impl Widget for &mut AppState<'_> {
                 // It probably should be changed to wrapping when there are more than a few
                 ui.columns(self.subcommands.len(), |ui| {
                     for (i, name) in self.subcommands.keys().enumerate() {
-                        ui[i].selectable_value(
-                            &mut self.current,
-                            Some(name.clone()),
-                            name.to_sentence_case(),
-                        );
+                        ui[i].selectable_value(&mut self.current, Some(name.clone()), name);
                     }
                 });
             }

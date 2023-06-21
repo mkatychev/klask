@@ -3,12 +3,18 @@ use klask::Settings;
 
 #[derive(Debug, Parser)]
 struct Opts {
-    #[clap(long)]
+    #[arg(long)]
     opt1: Option<String>,
-    #[clap(long)]
+    #[arg(long)]
     opt2: Option<String>,
 }
 
 fn main() {
-    klask::run_derived::<Opts, _>(Settings::default(), |opt| println!("{:?}", opt));
+    #[cfg(not(target_arch = "wasm32"))]
+    klask::run_derived_native::<Opts, _>(Settings::default(), |opt| println!("{opt:?}"));
+    #[cfg(target_arch = "wasm32")]
+    klask::run_derived_web::<Opts, _>(
+        Settings::default(),
+        |opt| async move { println!("{opt:?}") },
+    );
 }
