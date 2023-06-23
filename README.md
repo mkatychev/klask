@@ -2,7 +2,7 @@
 [![license](https://img.shields.io/crates/l/klask?style=for-the-badge)](LICENSE)
 [![docs.rs](https://img.shields.io/docsrs/klask?style=for-the-badge)](https://docs.rs/klask)
 # Klask
-Allows you to create a gui application automatically from clap (v4). Uses egui for graphics. [Changelog](CHANGELOG.md)
+Allows you to create a gui application automatically from clap (v4). Uses egui for graphics. [Changelog](CHANGELOG.md). [How it works](HowItWorks.md).
 
 ## Features
 - Supports optional fields with and without default values
@@ -24,13 +24,3 @@ Example gui:
 
 Generated from [miniserve](https://github.com/svenstaro/miniserve)'s app:
 ![image showcasing the gui](media/miniserve-2021-09-25.png)
-
-## How it works
-### Native
-* The binary runs and there's no `CHILD_APP_ENV_VAR` environment variable ⇾ no user code runs, only the GUI is displayed.
-* The "Run" button in the GUI is pressed ⇾ `CHILD_APP_ENV_VAR` is set, the binary is started again. Arguments are passed to `stdin` and `stdout` is intercepted for displaying output.
-* The binary is run with `CHILD_APP_ENV_VAR` ⇾ the user-provided closure is run.
-### Wasm
-* The main gui runs.
-* The "Run" button in the GUI is pressed ⇾ the asynchronous function provided is used to create a new future.
-* This future is repeatedly polled. Each time it is polled the gui is also repainted and each time the gui is repainted the function is polled. When the asynchronous function provided returns ready it is no longer polled.
