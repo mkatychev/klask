@@ -6,6 +6,7 @@ pub enum ExecutionError {
     NoValidationName,
     #[error("Internal match error: {0}")]
     MatchError(clap::Error),
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("Internal error: no child stdout or stderr")]
     NoStdoutOrStderr,
     #[error("Validation error in {}: '{}'", .name, .message)]

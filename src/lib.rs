@@ -40,19 +40,18 @@ pub mod settings;
 use app_state::AppState;
 use child_app::{ChildApp, StdinType};
 use clap::{ArgMatches, Command, CommandFactory, FromArgMatches};
+#[cfg(target_arch = "wasm32")]
+use core::{future::Future, task::Poll};
 use eframe::{
     egui::{self, Button, Color32, Context, FontData, FontDefinitions, Grid, Style, TextEdit, Ui},
     CreationContext, Frame,
 };
 use error::ExecutionError;
+use output::Output;
 #[cfg(not(target_arch = "wasm32"))]
 use rfd::FileDialog;
-
-use output::Output;
 pub use settings::{Localization, Settings};
-#[cfg(target_arch = "wasm32")]
-use std::task::Poll;
-use std::{borrow::Cow, future::Future, hash::Hash};
+use std::{borrow::Cow, hash::Hash};
 
 #[cfg(not(target_arch = "wasm32"))]
 const CHILD_APP_ENV_VAR: &str = "KLASK_CHILD_APP";
@@ -101,6 +100,7 @@ pub fn run_app_native(app: Command, settings: Settings, f: impl FnOnce(&ArgMatch
             custom_font: settings.custom_font,
             localization,
             style: settings.style,
+            platform_state: Native {},
         };
         let native_options = eframe::NativeOptions::default();
         eframe::run_native(
@@ -190,8 +190,7 @@ where
         custom_font: settings.custom_font,
         localization,
         style: settings.style,
-        fut_factory,
-        child: None,
+        platform_state: Wasm { fut_factory },
     };
     let web_options = eframe::WebOptions::default();
 
@@ -241,30 +240,48 @@ where
     });
 }
 
-/// Main object representing the [`egui`] ui. The lifetime is approximitely static and annotated as `'s`
-#[derive(Debug)]
+/// Platform specific state for Klask on native.
 #[cfg(not(target_arch = "wasm32"))]
-struct Klask<'s> {
-    state: AppState<'s>,
-    tab: Tab,
-    /// First string is a description
-    env: Option<(String, Vec<(String, String)>)>,
-    /// First string is a description
-    stdin: Option<(String, StdinType)>,
-    /// First string is a description
-    working_dir: Option<(String, String)>,
-    output: Output,
-    app: Command,
+struct Native {}
+/// Platform specific state for Klask on wasm.
+#[cfg(target_arch = "wasm32")]
+struct Wasm<F> {
+    /// The function given to klask to create futures which would act as an `async main` in a normal program.
+    fut_factory: F,
+}
+/// State design pattern.
+trait PlatformState {}
+#[cfg(not(target_arch = "wasm32"))]
+impl PlatformState for Native {}
+#[cfg(target_arch = "wasm32")]
+impl<F> PlatformState for Wasm<F> {}
 
-    custom_font: Option<Cow<'static, [u8]>>,
-    localization: &'s Localization,
-    style: Style,
+/// Function that can repeatedly create futures.
+#[cfg(target_arch = "wasm32")]
+pub trait FutFactory: FnMut(&ArgMatches) -> Self::Fut {
+    /// The type of future created by the function.
+    type Fut: Future<Output = ()>;
+}
+/// Implement the [`FutFactory`]  where it can be implemented.
+#[cfg(target_arch = "wasm32")]
+impl<T: FnMut(&ArgMatches) -> FutType, FutType> FutFactory for T
+where
+    FutType: Future<Output = ()>,
+{
+    type Fut = FutType;
+}
+
+/// Common parts of wasm and non wasm klask
+trait KlaskTrait<'s> {
+    fn is_child_running(&self) -> bool;
+    fn kill_child(&mut self);
+    fn try_start_execution(&mut self, ctx: egui::Context) -> Result<ChildApp, ExecutionError>;
+    fn update_stdin(&mut self, _: &mut Ui);
 }
 
 /// Main object representing the [`egui`] ui. The lifetime is approximitely static and annotated as `'s`
-#[cfg(target_arch = "wasm32")]
 #[derive(Debug)]
-struct Klask<'s, F> {
+struct Klask<'s, PlatformState> {
     state: AppState<'s>,
     tab: Tab,
     /// First string is a description
@@ -280,10 +297,8 @@ struct Klask<'s, F> {
     localization: &'s Localization,
     style: Style,
 
-    /// The function given to klask to create futures which would act as an `async main` in a normal program.
-    fut_factory: F,
-    /// The future representing the child if it exists.
-    child: Option<ChildApp>,
+    #[allow(dead_code)]
+    platform_state: PlatformState,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -293,58 +308,152 @@ enum Tab {
     Stdin,
 }
 
-/// Function that can repeatedly create futures.
-pub trait FutFactory: FnMut(&ArgMatches) -> Self::Fut {
-    /// The type of future created by the function.
-    type Fut: Future<Output = ()>;
-}
-/// Implement the [`FutFactory`]  where it can be implemented.
-impl<T: FnMut(&ArgMatches) -> FutType, FutType> FutFactory for T
+impl<'s, State> eframe::App for Klask<'s, State>
 where
-    FutType: Future<Output = ()>,
-{
-    type Fut = FutType;
-}
-
-#[cfg(target_arch = "wasm32")]
-impl<F> eframe::App for Klask<'_, F>
-where
-    F: FutFactory,
-    <F as FutFactory>::Fut: 'static,
+    Self: KlaskTrait<'s>,
 {
     fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
-        KlaskTrait::update(self, ctx)
+        egui::CentralPanel::default().show(ctx, |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                // Tab selection
+                let tab_count =
+                    1 + usize::from(self.env.is_some()) + usize::from(self.stdin.is_some());
+
+                if tab_count > 1 {
+                    ui.columns(tab_count, |ui| {
+                        let mut index = 0;
+                        ui[index].selectable_value(
+                            &mut self.tab,
+                            Tab::Arguments,
+                            &self.localization.arguments,
+                        );
+                        index += 1;
+
+                        if self.env.is_some() {
+                            ui[index].selectable_value(
+                                &mut self.tab,
+                                Tab::Env,
+                                &self.localization.env_variables,
+                            );
+                            index += 1;
+                        }
+                        if self.stdin.is_some() {
+                            ui[index].selectable_value(
+                                &mut self.tab,
+                                Tab::Stdin,
+                                &self.localization.input,
+                            );
+                        }
+                    });
+
+                    ui.separator();
+                }
+
+                // Display selected tab
+                match self.tab {
+                    Tab::Arguments => {
+                        ui.add(&mut self.state);
+
+                        // Working dir
+                        if let Some((ref desc, path)) = &mut self.working_dir {
+                            if !desc.is_empty() {
+                                ui.label(desc);
+                            }
+
+                            ui.horizontal(|ui| {
+                                if ui.button(&self.localization.select_directory).clicked() {
+                                    #[cfg(not(target_arch = "wasm32"))]
+                                    if let Some(file) = FileDialog::new().pick_folder() {
+                                        *path = file.to_string_lossy().into_owned();
+                                    }
+                                }
+                                ui.add(
+                                    TextEdit::singleline(path)
+                                        .hint_text(&self.localization.working_directory),
+                                )
+                            });
+                            ui.add_space(10.0);
+                        }
+                    }
+                    Tab::Env => self.update_env(ui),
+                    Tab::Stdin => self.update_stdin(ui),
+                }
+
+                // Run button row
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(
+                            !self.is_child_running(),
+                            Button::new(&self.localization.run),
+                        )
+                        .clicked()
+                    {
+                        match self.try_start_execution(ctx.clone()) {
+                            Ok(child) => {
+                                // Reset
+                                self.state.update_validation_error("", "");
+                                self.output = Output::new_with_child(child);
+                            }
+                            Err(err) => {
+                                if let ExecutionError::ValidationError { name, message } = &err {
+                                    self.state.update_validation_error(name, message);
+                                }
+                                self.output = Output::Err(err);
+                            }
+                        }
+                    }
+
+                    if self.is_child_running() && ui.button(&self.localization.kill).clicked() {
+                        self.kill_child();
+                    }
+
+                    if self.is_child_running() {
+                        let mut running_text = String::from(&self.localization.running);
+                        for _ in 0..((2.0 * ui.input(|i| i.time)) as i32 % 4) {
+                            running_text.push('.');
+                        }
+                        ui.label(running_text);
+                    }
+                });
+
+                // If on wasm must poll the child to make progress.
+                #[cfg(target_arch = "wasm32")]
+                if let Some(ref mut child) = self.child_mut() {
+                    match child.poll() {
+                        Poll::Ready(()) => self.kill_child(),
+                        Poll::Pending => (),
+                    }
+                };
+                ui.add(&mut self.output);
+            });
+        });
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-impl eframe::App for Klask<'_> {
-    fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
-        KlaskTrait::update(self, ctx)
+impl<'s, State> Klask<'s, State>
+where
+    Self: KlaskTrait<'s>,
+{
+    #[allow(dead_code)]
+    fn child(&self) -> Option<&ChildApp> {
+        match &self.output {
+            Output::Child(child, _) => Some(child),
+            _ => None,
+        }
     }
-}
 
-/// Common parts of wasm and non wasm klask
-trait KlaskTrait<'s> {
-    fn state(&mut self) -> &mut AppState<'s>;
-    fn tab(&mut self) -> &mut Tab;
-    fn env(&mut self) -> &mut Option<(String, Vec<(String, String)>)>;
-    fn stdin(&mut self) -> &mut Option<(String, StdinType)>;
-    fn working_dir(&mut self) -> &mut Option<(String, String)>;
-    fn output(&mut self) -> &mut Output;
-    fn custom_font(&mut self) -> &mut Option<Cow<'static, [u8]>>;
-    fn localization(&self) -> &Localization;
-    fn style(&mut self) -> &mut Style;
-    #[cfg(target_arch = "wasm32")]
-    fn child(&mut self) -> &mut Option<ChildApp>;
-    fn is_child_running(&self) -> bool;
-    fn kill_child(&mut self);
-    fn try_start_execution(&mut self, ctx: egui::Context) -> Result<ChildApp, ExecutionError>;
-    fn update_stdin(&mut self, _: &mut Ui);
+    #[allow(dead_code)]
+    fn child_mut(&mut self) -> Option<&mut ChildApp> {
+        match &mut self.output {
+            Output::Child(child, _) => Some(child),
+            _ => None,
+        }
+    }
+
     fn setup(&mut self, cc: &CreationContext) {
-        cc.egui_ctx.set_style(self.style().clone());
+        cc.egui_ctx.set_style(self.style.clone());
 
-        if let Some(custom_font) = self.custom_font().take() {
+        if let Some(custom_font) = self.custom_font.take() {
             let font_name = String::from("custom_font");
             let mut fonts = FontDefinitions::default();
 
@@ -372,9 +481,9 @@ trait KlaskTrait<'s> {
             cc.egui_ctx.set_fonts(fonts);
         }
     }
+
     fn update_env(&mut self, ui: &mut Ui) {
-        let new_text = self.localization().new_value.clone();
-        let (ref desc, env) = self.env().as_mut().unwrap();
+        let (ref desc, env) = self.env.as_mut().unwrap();
 
         if !desc.is_empty() {
             ui.label(desc);
@@ -421,192 +530,30 @@ trait KlaskTrait<'s> {
             }
         }
 
-        if ui.button(new_text).clicked() {
+        if ui.button(&self.localization.new_value).clicked() {
             env.push(Default::default());
         }
 
         ui.separator();
     }
-    fn update(&mut self, ctx: &Context) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                let localization = self.localization().clone();
-                // Tab selection
-                let tab_count =
-                    1 + usize::from(self.env().is_some()) + usize::from(self.stdin().is_some());
-
-                if tab_count > 1 {
-                    ui.columns(tab_count, |ui| {
-                        let mut index = 0;
-                        ui[index].selectable_value(
-                            self.tab(),
-                            Tab::Arguments,
-                            localization.arguments,
-                        );
-                        index += 1;
-
-                        if self.env().is_some() {
-                            ui[index].selectable_value(
-                                self.tab(),
-                                Tab::Env,
-                                localization.env_variables,
-                            );
-                            index += 1;
-                        }
-                        if self.stdin().is_some() {
-                            ui[index].selectable_value(self.tab(), Tab::Stdin, localization.input);
-                        }
-                    });
-
-                    ui.separator();
-                }
-
-                // Display selected tab
-                match self.tab() {
-                    Tab::Arguments => {
-                        ui.add(self.state());
-
-                        // Working dir
-                        if let Some((ref desc, path)) = self.working_dir() {
-                            if !desc.is_empty() {
-                                ui.label(desc);
-                            }
-
-                            ui.horizontal(|ui| {
-                                if ui.button(&localization.select_directory).clicked() {
-                                    #[cfg(not(target_arch = "wasm32"))]
-                                    if let Some(file) = FileDialog::new().pick_folder() {
-                                        *path = file.to_string_lossy().into_owned();
-                                    }
-                                }
-                                ui.add(
-                                    TextEdit::singleline(path)
-                                        .hint_text(&localization.working_directory),
-                                )
-                            });
-                            ui.add_space(10.0);
-                        }
-                    }
-                    Tab::Env => self.update_env(ui),
-                    Tab::Stdin => self.update_stdin(ui),
-                }
-
-                // Run button row
-                ui.horizontal(|ui| {
-                    if ui
-                        .add_enabled(
-                            !self.is_child_running(),
-                            Button::new(&self.localization().run),
-                        )
-                        .clicked()
-                    {
-                        match self.try_start_execution(ctx.clone()) {
-                            Ok(child) => {
-                                // Reset
-                                self.state().update_validation_error("", "");
-                                #[cfg(target_arch = "wasm32")]
-                                {
-                                    // Save new child to poll later.
-                                    #[cfg(target_arch = "wasm32")]
-                                    {
-                                        *self.child() = Some(child);
-                                    }
-                                }
-                                #[cfg(not(target_arch = "wasm32"))]
-                                {
-                                    *self.output() = Output::new_with_child(child);
-                                }
-                            }
-                            Err(err) => {
-                                if let ExecutionError::ValidationError { name, message } = &err {
-                                    self.state().update_validation_error(name, message);
-                                }
-                                *self.output() = Output::Err(err);
-                            }
-                        }
-                    }
-
-                    if self.is_child_running() && ui.button(&self.localization().kill).clicked() {
-                        self.kill_child();
-                    }
-
-                    if self.is_child_running() {
-                        let mut running_text = String::from(&self.localization().running);
-                        for _ in 0..((2.0 * ui.input(|i| i.time)) as i32 % 4) {
-                            running_text.push('.');
-                        }
-                        ui.label(running_text);
-                    }
-                });
-
-                // If on wasm must poll the child to make progress.
-                #[cfg(target_arch = "wasm32")]
-                {
-                    if let Some(ref mut child) = self.child() {
-                        match child.poll() {
-                            Poll::Ready(()) => self.kill_child(),
-                            Poll::Pending => (),
-                        }
-                    };
-                }
-                ui.add(self.output());
-            });
-        });
-    }
 }
 
 #[cfg(target_arch = "wasm32")]
-impl<'s, F> KlaskTrait<'s> for Klask<'s, F>
+impl<'s, F> KlaskTrait<'s> for Klask<'s, Wasm<F>>
 where
     F: FutFactory,
     <F as FutFactory>::Fut: 'static,
 {
-    fn state(&mut self) -> &mut AppState<'s> {
-        &mut self.state
-    }
-
-    fn tab(&mut self) -> &mut Tab {
-        &mut self.tab
-    }
-
-    fn env(&mut self) -> &mut Option<(String, Vec<(String, String)>)> {
-        &mut self.env
-    }
-
-    fn stdin(&mut self) -> &mut Option<(String, StdinType)> {
-        &mut self.stdin
-    }
-
-    fn working_dir(&mut self) -> &mut Option<(String, String)> {
-        &mut self.working_dir
-    }
-
-    fn output(&mut self) -> &mut Output {
-        &mut self.output
-    }
-
-    fn custom_font(&mut self) -> &mut Option<Cow<'static, [u8]>> {
-        &mut self.custom_font
-    }
-
-    fn localization(&self) -> &Localization {
-        self.localization
-    }
-
-    fn style(&mut self) -> &mut Style {
-        &mut self.style
-    }
-
-    fn child(&mut self) -> &mut Option<ChildApp> {
-        &mut self.child
-    }
-
     fn is_child_running(&self) -> bool {
-        self.child.is_some()
+        // No child process to monitor. If it is stored it is "running".
+        self.child().is_some()
     }
 
     fn kill_child(&mut self) {
-        self.child = None
+        // No child process to kill. Just remove from output to kill.
+        if let Output::Child(_, _) = self.output {
+            self.output = Output::None;
+        }
     }
 
     fn try_start_execution(&mut self, ctx: egui::Context) -> Result<ChildApp, ExecutionError> {
@@ -628,7 +575,10 @@ where
                 .into());
         }
 
-        Ok(ChildApp::new(ctx, (self.fut_factory)(&matches)))
+        Ok(ChildApp::new(
+            ctx,
+            (self.platform_state.fut_factory)(&matches),
+        ))
     }
 
     fn update_stdin(&mut self, _: &mut Ui) {
@@ -637,43 +587,7 @@ where
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-impl<'s> KlaskTrait<'s> for Klask<'s> {
-    fn state(&mut self) -> &mut AppState<'s> {
-        &mut self.state
-    }
-
-    fn tab(&mut self) -> &mut Tab {
-        &mut self.tab
-    }
-
-    fn env(&mut self) -> &mut Option<(String, Vec<(String, String)>)> {
-        &mut self.env
-    }
-
-    fn stdin(&mut self) -> &mut Option<(String, StdinType)> {
-        &mut self.stdin
-    }
-
-    fn working_dir(&mut self) -> &mut Option<(String, String)> {
-        &mut self.working_dir
-    }
-
-    fn output(&mut self) -> &mut Output {
-        &mut self.output
-    }
-
-    fn custom_font(&mut self) -> &mut Option<Cow<'static, [u8]>> {
-        &mut self.custom_font
-    }
-
-    fn localization(&self) -> &Localization {
-        self.localization
-    }
-
-    fn style(&mut self) -> &mut Style {
-        &mut self.style
-    }
-
+impl<'s> KlaskTrait<'s> for Klask<'s, Native> {
     fn is_child_running(&self) -> bool {
         match &self.output {
             Output::Child(child, _) => child.is_running(),
@@ -716,8 +630,7 @@ impl<'s> KlaskTrait<'s> for Klask<'s> {
     }
 
     fn update_stdin(&mut self, ui: &mut Ui) {
-        let localization = self.localization().clone();
-        let (ref desc, stdin) = self.stdin().as_mut().unwrap();
+        let (ref desc, stdin) = self.stdin.as_mut().unwrap();
 
         if !desc.is_empty() {
             ui.label(desc);
@@ -725,14 +638,14 @@ impl<'s> KlaskTrait<'s> for Klask<'s> {
 
         ui.columns(2, |ui| {
             if ui[0]
-                .selectable_label(matches!(stdin, StdinType::Text(_)), &localization.text)
+                .selectable_label(matches!(stdin, StdinType::Text(_)), &self.localization.text)
                 .clicked()
                 && matches!(stdin, StdinType::File(_))
             {
                 *stdin = StdinType::Text(String::new());
             }
             if ui[1]
-                .selectable_label(matches!(stdin, StdinType::File(_)), &localization.file)
+                .selectable_label(matches!(stdin, StdinType::File(_)), &self.localization.file)
                 .clicked()
                 && matches!(stdin, StdinType::Text(_))
             {
@@ -743,7 +656,7 @@ impl<'s> KlaskTrait<'s> for Klask<'s> {
         match stdin {
             StdinType::File(path) => {
                 ui.horizontal(|ui| {
-                    if ui.button(&localization.select_file).clicked() {
+                    if ui.button(&self.localization.select_file).clicked() {
                         #[cfg(not(target_arch = "wasm32"))]
                         if let Some(file) = FileDialog::new().pick_file() {
                             *path = file.to_string_lossy().into_owned();

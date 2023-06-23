@@ -37,6 +37,7 @@ impl Debug for ChildApp {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum StdinType {
+    #[cfg(not(target_arch = "wasm32"))]
     File(String),
     Text(String),
 }
@@ -53,7 +54,8 @@ impl ChildApp {
     }
 
     pub fn read(&mut self) -> String {
-        todo!()
+        // TODO
+        "TODO setup tracing subscriber or logger impl".to_owned()
     }
 
     pub fn new<Fut>(ctx: egui::Context, fut: Fut) -> Self
