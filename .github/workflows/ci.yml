@@ -46,8 +46,9 @@ jobs:
         with:
           command: test
           args: --all-features
-      - name: Clippy
-        uses: actions-rs/clippy-check@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features -- -D warnings
+      # Below doesn't work in forks. See <https://github.com/actions-rs/clippy-check/issues/2>
+      # - name: Clippy
+      #   uses: actions-rs/clippy-check@v1
+      #   with:
+      #     token: ${{ secrets.GITHUB_TOKEN }}
+      #     args: --all-features -- -D warnings
