@@ -44,12 +44,9 @@ pub enum StdinType {
 #[cfg(target_arch = "wasm32")]
 impl ChildApp {
     pub fn poll(&mut self) -> Poll<()> {
-        let poll_result = self
-            .fut
-            .as_mut()
-            .poll(&mut futures::task::Context::from_waker(
-                futures::task::noop_waker_ref(),
-            ));
+        let poll_result = self.fut.as_mut().poll(&mut core::task::Context::from_waker(
+            futures::task::noop_waker_ref(),
+        ));
         // Request repaint after polling
         self.ctx.request_repaint();
         poll_result

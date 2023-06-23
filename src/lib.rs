@@ -1,6 +1,6 @@
 #![warn(missing_docs)]
-//! You can use [`run_app`] for [`Command`]s created manually or generated from yaml and
-//! [`run_derived`] for [`Command`]s derived from a struct. Both of these functions take
+//! You can use [`run_app_native`]/[`run_app_web`] for [`Command`]s created manually or generated from yaml and
+//! [`run_derived_native`]/[`run_derived_web`] for [`Command`]s derived from a struct. Both of these functions take
 //! a closure that contains the code that would normally be in `main`. They should be
 //! the last thing you call in `main`.
 //!
@@ -25,10 +25,7 @@
 //! }
 //! ```
 //!
-//! How it works:
-//! * The binary runs and there's no `CHILD_APP_ENV_VAR` environment variable ⇾ no user code runs, only the GUI is displayed.
-//! * The "Run" button in the GUI is pressed ⇾ `CHILD_APP_ENV_VAR` is set, the binary is started again. Arguments are passed to `stdin` and `stdout` is intercepted for displaying output.
-//! * The binary is run with `CHILD_APP_ENV_VAR` ⇾ the user-provided closure is run.
+#![doc = include_str!("../HowItWorks.md")]
 
 /// App state
 pub mod app_state;
@@ -118,7 +115,7 @@ pub fn run_app_native(app: Command, settings: Settings, f: impl FnOnce(&ArgMatch
     }
 }
 
-/// Can be used with a struct deriving [`clap::Clap`]. Call with a closure that contains the code that would normally be in `main`.
+/// Can be used with a struct deriving [`clap::Parser`]. Call with a closure that contains the code that would normally be in `main`.
 /// It's just a wrapper over [`run_app_native`].
 /// ```no_run
 /// # use clap::Parser;
@@ -214,7 +211,7 @@ where
     });
 }
 
-/// Can be used with a struct deriving [`clap::Clap`]. Call with a closure that contains the code that would normally be in `main`.
+/// Can be used with a struct deriving [`clap::Parser`]. Call with a closure that contains the code that would normally be in `main`.
 /// It's just a wrapper over [`run_app_web`].
 /// ```no_run
 /// # use clap::Parser;
@@ -789,7 +786,7 @@ fn is_not_alphanumeric(character: char) -> bool {
     !character.is_alphanumeric()
 }
 
-/// Sentence case from https://github.com/whatisinternet/Inflector
+/// Sentence case from <https://github.com/whatisinternet/Inflector>
 pub fn to_sentence_case(convertable_string: &str) -> String {
     let mut new_word: bool = true;
     let mut first_word: bool = true;
