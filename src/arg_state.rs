@@ -120,6 +120,10 @@ impl<'s> ArgState<'s> {
                     if let Some(file) = FileDialog::new().pick_file() {
                         *value = file.to_string_lossy().into_owned();
                     }
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        *value = "wasm requires selecting file after pressing run".to_owned();
+                    }
                 }
 
                 if matches!(value_hint, ValueHint::AnyPath | ValueHint::DirPath)
@@ -128,6 +132,10 @@ impl<'s> ArgState<'s> {
                     #[cfg(not(target_arch = "wasm32"))]
                     if let Some(file) = FileDialog::new().pick_folder() {
                         *value = file.to_string_lossy().into_owned();
+                    }
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        *value = "wasm requires selecting file after pressing run".to_owned();
                     }
                 }
 
