@@ -207,7 +207,7 @@ where
 {
     let app = C::command();
     let localization = Localization::default();
-    let mut app_state = AppState::new(&app, &localization);
+    let mut app_state = AppState::new(&app, &localization, false);
     setup(&mut app_state.args);
     let args = app_state.get_cmd_args(vec!["_name".into()]).unwrap();
     eprintln!("Args: {:?}", &args[1..]);
