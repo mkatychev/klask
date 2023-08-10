@@ -30,6 +30,9 @@ pub struct Settings {
     /// ```
     pub custom_font: Option<Cow<'static, [u8]>>,
 
+    /// Whether to use try using `long_about` or `about` first. If one is missing this does nothing.
+    pub prefer_long_about: bool,
+
     /// Override builtin strings. By default everything is in english.
     pub localization: Localization,
 
@@ -44,6 +47,7 @@ impl Default for Settings {
             enable_stdin: Option::default(),
             enable_working_dir: Option::default(),
             custom_font: Option::default(),
+            prefer_long_about: Default::default(),
             localization: Default::default(),
             style: Style {
                 spacing: Spacing {

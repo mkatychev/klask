@@ -16,7 +16,17 @@ pub struct AppState<'s> {
 
 impl<'s> AppState<'s> {
     /// [`AppState`] constructor
-    pub fn new(app: &Command, localization: &'s Localization) -> Self {
+    pub fn new(app: &Command, localization: &'s Localization, prefer_long_about: bool) -> Self {
+        let about = if prefer_long_about {
+            app.get_long_about()
+                .map(|v| v.to_string())
+                .or_else(|| app.get_about().map(|v| v.to_string()))
+        } else {
+            app.get_about()
+                .map(|v| v.to_string())
+                .or_else(|| app.get_long_about().map(|v| v.to_string()))
+        };
+
         let args = app
             .get_arguments()
             .filter(|a| a.get_id() != "help" && a.get_id() != "version")
@@ -25,12 +35,17 @@ impl<'s> AppState<'s> {
 
         let subcommands = app
             .get_subcommands()
-            .map(|app| (app.get_name().to_string(), AppState::new(app, localization)))
+            .map(|app| {
+                (
+                    app.get_name().to_string(),
+                    AppState::new(app, localization, prefer_long_about),
+                )
+            })
             .collect();
 
         AppState {
             id: Uuid::new_v4(),
-            about: app.get_about().map(|v| v.to_string()),
+            about,
             args,
             subcommands,
             current: app

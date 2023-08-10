@@ -86,7 +86,7 @@ pub fn run_app_native(app: Command, settings: Settings, f: impl FnOnce(&ArgMatch
         let localization = Box::leak(Box::new(settings.localization));
 
         let mut klask = Klask {
-            state: AppState::new(&app, localization),
+            state: AppState::new(&app, localization, settings.prefer_long_about),
             tab: Tab::Arguments,
             env: settings.enable_env.map(|desc| (desc, vec![])),
             stdin: settings
@@ -176,7 +176,7 @@ where
     let localization = Box::leak(Box::new(settings.localization));
 
     let mut klask = Klask {
-        state: AppState::new(&app, localization),
+        state: AppState::new(&app, localization, settings.prefer_long_about),
         tab: Tab::Arguments,
         env: settings.enable_env.map(|desc| (desc, vec![])),
         stdin: settings
