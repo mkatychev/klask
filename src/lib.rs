@@ -32,6 +32,9 @@ pub mod app_state;
 mod arg_state;
 mod child_app;
 mod error;
+#[cfg(target_arch = "wasm32")]
+/// Logger that outputs all logs to the gui output.
+pub mod logger;
 /// Additional options for output like progress bars.
 pub mod output;
 /// Settings
@@ -40,8 +43,6 @@ pub mod settings;
 use app_state::AppState;
 use child_app::{ChildApp, StdinType};
 use clap::{ArgMatches, Command, CommandFactory, FromArgMatches};
-#[cfg(target_arch = "wasm32")]
-use core::{future::Future, task::Poll};
 use eframe::{
     egui::{self, Button, Color32, Context, FontData, FontDefinitions, Grid, Style, TextEdit, Ui},
     CreationContext, Frame,
@@ -52,6 +53,8 @@ use output::Output;
 use rfd::FileDialog;
 pub use settings::{Localization, Settings};
 use std::{borrow::Cow, hash::Hash};
+#[cfg(target_arch = "wasm32")]
+use std::{future::Future, sync::Arc, task::Poll};
 
 #[cfg(not(target_arch = "wasm32"))]
 const CHILD_APP_ENV_VAR: &str = "KLASK_CHILD_APP";
@@ -190,7 +193,11 @@ where
         custom_font: settings.custom_font,
         localization,
         style: settings.style,
-        platform_state: Wasm { fut_factory },
+        platform_state: Wasm {
+            fut_factory,
+            // Init with max log level. Library user can use [`Logger::set_level`] to change.
+            logger: logger::Logger::init(log::STATIC_MAX_LEVEL).unwrap(),
+        },
     };
     let web_options = eframe::WebOptions::default();
 
@@ -248,6 +255,8 @@ struct Native {}
 struct Wasm<F> {
     /// The function given to klask to create futures which would act as an `async main` in a normal program.
     fut_factory: F,
+    // A reference to the logger containing a queue of all unprocessed messages.
+    logger: Arc<logger::Logger>,
 }
 /// State design pattern.
 trait PlatformState {}
@@ -545,15 +554,17 @@ where
     <F as FutFactory>::Fut: 'static,
 {
     fn is_child_running(&self) -> bool {
-        // No child process to monitor. If it is stored it is "running".
-        self.child().is_some()
+        // No child process to monitor. If it is stored and not killed it is "running".
+        if let Some(child) = self.child() {
+            child.is_running()
+        } else {
+            false
+        }
     }
 
     fn kill_child(&mut self) {
-        // No child process to kill. Just remove from output to kill.
-        if let Output::Child(_, _) = self.output {
-            self.output = Output::None;
-        }
+        // No child process to kill. Just tell the child to die.
+        self.child_mut().map(|child| child.kill());
     }
 
     fn try_start_execution(&mut self, ctx: egui::Context) -> Result<ChildApp, ExecutionError> {
@@ -578,6 +589,7 @@ where
         Ok(ChildApp::new(
             ctx,
             (self.platform_state.fut_factory)(&matches),
+            self.platform_state.logger.clone(),
         ))
     }
 

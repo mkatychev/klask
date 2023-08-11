@@ -1,8 +1,10 @@
+#[cfg(target_arch = "wasm32")]
+use crate::logger::Logger;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::{ExecutionError, CHILD_APP_ENV_VAR};
 use eframe::egui;
 #[cfg(target_arch = "wasm32")]
-use std::{fmt::Debug, future::Future, pin::Pin, task::Poll};
+use std::{fmt::Debug, future::Future, pin::Pin, sync::Arc, task::Poll};
 #[cfg(not(target_arch = "wasm32"))]
 use std::{
     fs::File,
@@ -24,7 +26,10 @@ pub struct ChildApp {
 #[cfg(target_arch = "wasm32")]
 pub struct ChildApp {
     ctx: egui::Context,
-    fut: Pin<Box<dyn Future<Output = ()>>>,
+    /// If child is running it contains a future. If it is killed it has no future.
+    fut: Option<Pin<Box<dyn Future<Output = ()>>>>,
+    /// Logger contains a queue of logs to add to the display.
+    logger: Arc<Logger>,
 }
 
 // TODO fix this impl to something better.
@@ -45,26 +50,49 @@ pub enum StdinType {
 #[cfg(target_arch = "wasm32")]
 impl ChildApp {
     pub fn poll(&mut self) -> Poll<()> {
-        let poll_result = self.fut.as_mut().poll(&mut core::task::Context::from_waker(
-            futures::task::noop_waker_ref(),
-        ));
-        // Request repaint after polling
-        self.ctx.request_repaint();
-        poll_result
+        if let Some(fut) = self.fut.as_mut() {
+            let poll_result = fut.as_mut().poll(&mut core::task::Context::from_waker(
+                futures::task::noop_waker_ref(),
+            ));
+            // Request repaint after polling to update message output.
+            self.ctx.request_repaint();
+            poll_result
+        } else {
+            // If child has no future then it has already been exhausted.
+            Poll::Ready(())
+        }
     }
 
     pub fn read(&mut self) -> String {
-        // TODO
-        "TODO setup tracing subscriber or logger impl".to_owned()
+        self.logger
+            .queue
+            .lock()
+            .drain(..)
+            .map(|x| {
+                let mut out = x;
+                out.push('\n'); // Concatenate messages with newlines
+                out
+            })
+            .collect()
     }
 
-    pub fn new<Fut>(ctx: egui::Context, fut: Fut) -> Self
+    // TODO `ChildApp` trait instead of duplicate methods
+    pub fn is_running(&self) -> bool {
+        self.fut.is_some()
+    }
+
+    pub fn kill(&mut self) {
+        self.fut = None;
+    }
+
+    pub fn new<Fut>(ctx: egui::Context, fut: Fut, logger: Arc<Logger>) -> Self
     where
         Fut: Future<Output = ()> + 'static,
     {
         ChildApp {
             ctx,
-            fut: Box::pin(fut),
+            fut: Some(Box::pin(fut)),
+            logger,
         }
     }
 }
