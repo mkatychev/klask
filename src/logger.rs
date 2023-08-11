@@ -1,10 +1,14 @@
 use eframe::epaint::mutex::Mutex;
 use log::LevelFilter;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+
+/// The [`Logger`]. It is static so it can be changed from outside klask from anywhere using [`Logger::set_max_level`].
+// Only needed because [`log`] doesn't give direct access to the global boxed logger.
+static LOGGER: OnceLock<Arc<Logger>> = OnceLock::new();
 
 /// Implements [`log::Log`] to log messages to the klask gui.
 /// # Panics
-/// Panics if attempts to log while already logging.
+/// Panics on Wasm if attempts to log while already logging.
 pub struct Logger {
     pub(crate) filter: Mutex<LevelFilter>,
     pub(crate) queue: Mutex<Vec<String>>,
@@ -13,12 +17,17 @@ pub struct Logger {
 impl Logger {
     /// Initialize the [`Logger`] with the given [`LevelFilter`].
     ///
-    /// This should only be called once as indicated in [`log::set_boxed_logger`]
-    pub(crate) fn init(filter: LevelFilter) -> Result<Arc<Logger>, log::SetLoggerError> {
-        let logger = Arc::new(Logger::new(filter));
-        log::set_max_level(filter);
-        log::set_boxed_logger(Box::new(logger.clone()))?;
-        Ok(logger)
+    /// Can be called multiple times because protected by [`OnceLock`].
+    ///
+    /// Won't set the filter if another thread intialized first.
+    pub(crate) fn init(filter: LevelFilter) -> Result<Arc<Self>, log::SetLoggerError> {
+        if LOGGER.set(Arc::new(Logger::new(filter))).is_ok() {
+            log::set_max_level(filter);
+            log::set_boxed_logger(Box::new(
+                LOGGER.get().expect("Logger is set already").clone(),
+            ))?;
+        }
+        Ok(LOGGER.get().expect("Logger is set already").clone())
     }
 
     /// Constructor for [`Logger`].
@@ -30,9 +39,9 @@ impl Logger {
     }
 
     /// Change the log level.
-    pub fn set_level(&self, filter: LevelFilter) {
+    pub fn set_max_level(filter: LevelFilter) {
         log::set_max_level(filter);
-        *self.filter.lock() = filter;
+        LOGGER.get().map(|logger| *logger.filter.lock() = filter);
     }
 }
 

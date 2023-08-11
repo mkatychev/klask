@@ -149,16 +149,20 @@ where
 /// Call with a [`Command`] and a closure that contains the code that would normally be in `main`.
 /// Slightly more complicated to use then [`run_app_native`] because async closures don't exist yet.
 /// ```no_run
-/// # use clap::{Command, arg};
-/// # use klask::Settings;
-/// // (Optional) Redirect `log` message to `console.log` and friends:
-/// eframe::WebLogger::init(log::LevelFilter::Info).ok();
+/// let app = clap::Command::new("name of a valid html canvas id").arg(
+///     clap::Arg::new("debug")
+///         .short('d')
+///         .long("debug")
+///         .action(clap::ArgAction::SetTrue)
+///         .help("turns on debugging mode"),
+/// );
 ///
-/// let app = Command::new("Example").arg(arg!(--debug <VALUE>).short('d'));
-/// klask::run_app_web(app, Settings::default(), |matches| {
-///     let main = |matches: ArgMatches| async move {
-///         log::info!("{:?}", matches.try_contains_id("debug"))
-///         println!("{:?}", matches.try_contains_id("debug")) // prints don't work on wasm so this line doesn't do anything.
+/// klask::run_app_web(app, klask::Settings::default(), |matches| {
+///     let main = |matches: clap::ArgMatches| async move {
+///         // (Optional) Set output level.
+///         klask::logger::Logger::set_max_level(log::LevelFilter::Info);
+///         log::info!("{}", matches.get_flag("debug"));
+///         println!("{}", matches.get_flag("debug")); // prints don't work on wasm so this line doesn't do anything.
 ///     };
 ///     main(matches.clone())
 /// });
@@ -195,8 +199,8 @@ where
         style: settings.style,
         platform_state: Wasm {
             fut_factory,
-            // Init with max log level. Library user can use [`Logger::set_level`] to change.
-            logger: logger::Logger::init(log::STATIC_MAX_LEVEL).unwrap(),
+            // Init without logging so eframe's setup output is ignored. Library user can use [`Logger::set_max_level`] to change.
+            logger: logger::Logger::init(log::LevelFilter::Off).unwrap(),
         },
     };
     let web_options = eframe::WebOptions::default();
@@ -217,21 +221,23 @@ where
     });
 }
 
-/// Can be used with a struct deriving [`clap::Parser`]. Call with a closure that contains the code that would normally be in `main`.
+/// Can be used with a struct deriving [`clap::Parser`]. Call with a closure that contains the code that would normally be in `async main`.
 /// It's just a wrapper over [`run_app_web`].
+/// Note: html canvas id in html must match the crate name when deriving
 /// ```no_run
-/// # use clap::Parser;
-/// # use klask::Settings;
+/// use clap::Parser;
+/// use klask::Settings;
+///
 /// #[derive(Parser)]
 /// struct Example {
 ///     #[arg(short)]
 ///     debug: bool,
 /// }
-/// // (Optional) Redirect `log` message to `console.log` and friends:
-/// eframe::WebLogger::init(log::LevelFilter::Info).ok();
 ///
 /// klask::run_derived_web::<Example, _>(Settings::default(), |example| async move {
-///     log::info!("{:?}", matches.try_contains_id("debug"))
+///     // (Optional) Set output level.
+///     klask::logger::Logger::set_max_level(log::LevelFilter::Info);
+///     log::info!("{}", example.debug);
 ///     println!("{}", example.debug); // prints don't work on wasm so this line doesn't do anything.
 /// });
 /// ```
