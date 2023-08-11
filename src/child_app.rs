@@ -32,11 +32,18 @@ pub struct ChildApp {
     logger: Arc<Logger>,
 }
 
-// TODO fix this impl to something better.
 #[cfg(target_arch = "wasm32")]
 impl Debug for ChildApp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ChildApp").field("fut", &"TODO").finish()
+        f.debug_struct("ChildApp")
+            .field(
+                "fut",
+                match self.fut {
+                    Some(_) => &"Running",
+                    None => &"Killed",
+                },
+            )
+            .finish()
     }
 }
 
@@ -54,7 +61,7 @@ impl ChildApp {
             let poll_result = fut.as_mut().poll(&mut core::task::Context::from_waker(
                 futures::task::noop_waker_ref(),
             ));
-            // Request repaint after polling to update message output.
+            // Request repaint after polling to update message output and to continue driving fut.
             self.ctx.request_repaint();
             poll_result
         } else {
