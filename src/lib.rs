@@ -219,6 +219,30 @@ where
             .await
             .unwrap();
     });
+
+    let previous_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        // Add basic dialog on top of gui to show a panic occurred.
+        let document = web_sys::window()
+            .expect("Window not found")
+            .document()
+            .expect("Document not found");
+        let div = document.create_element("div").expect("Create div element");
+        div.set_attribute(
+            "style",
+            "white-space: pre-wrap; position: fixed; z-index: 1000; display: flex; flex-direction: column; background-color: white; width: 100%;",
+        )
+        .ok();
+        let p = document.create_element("p").expect("Create p element");
+        p.set_inner_html(&format!(
+            "{panic_info}\n\nCheck the console for more information. Please restart the app"
+        ));
+        div.append_child(&p).ok();
+        document.body().expect("body").append_child(&div).ok();
+
+        // Propagate panic info to the previously registered panic hook
+        previous_hook(panic_info);
+    }));
 }
 
 /// Can be used with a struct deriving [`clap::Parser`]. Call with a closure that contains the code that would normally be in `async main`.
