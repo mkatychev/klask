@@ -1,6 +1,9 @@
 use eframe::epaint::mutex::Mutex;
 use log::LevelFilter;
-use std::sync::{Arc, OnceLock};
+use std::{
+    fmt::Debug,
+    sync::{Arc, OnceLock},
+};
 
 /// The [`Logger`]. It is static so it can be changed from outside klask from anywhere using [`Logger::set_max_level`].
 // Only needed because [`log`] doesn't give direct access to the global boxed logger.
@@ -12,6 +15,12 @@ static LOGGER: OnceLock<Arc<Logger>> = OnceLock::new();
 pub struct Logger {
     pub(crate) filter: Mutex<LevelFilter>,
     pub(crate) queue: Mutex<Vec<String>>,
+}
+
+impl Debug for Logger {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Logger").finish_non_exhaustive()
+    }
 }
 
 impl Logger {

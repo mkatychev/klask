@@ -36,6 +36,7 @@ pub struct ChildApp {
 impl Debug for ChildApp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ChildApp")
+            .field("ctx", &self.ctx)
             .field(
                 "fut",
                 match self.fut {
@@ -43,6 +44,7 @@ impl Debug for ChildApp {
                     None => &"Killed",
                 },
             )
+            .field("logger", &self.logger)
             .finish()
     }
 }
@@ -75,10 +77,9 @@ impl ChildApp {
             .queue
             .lock()
             .drain(..)
-            .map(|x| {
-                let mut out = x;
-                out.push('\n'); // Concatenate messages with newlines
-                out
+            .map(|mut x| {
+                x.push('\n'); // Concatenate messages with newlines
+                x
             })
             .collect()
     }
