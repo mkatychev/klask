@@ -2,6 +2,7 @@
 - Added localization settings
 - Added style settings, for setting egui styling
 - Added `#[non_exhaustive]` to setting so adding new ones won't be a breaking change
+- Update `clap` to 4.
 - Added Wasm support.
 
 ## Version 1.0.0
