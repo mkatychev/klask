@@ -44,9 +44,13 @@ use app_state::AppState;
 use child_app::{ChildApp, StdinType};
 use clap::{ArgMatches, Command, CommandFactory, FromArgMatches};
 use eframe::{
-    egui::{self, Button, Color32, Context, FontData, FontDefinitions, Grid, Style, TextEdit, Ui},
+    egui::{
+        self, Align, Button, Color32, Context, FontData, FontDefinitions, Grid, Image,
+        Layout, Style, TextEdit, Ui,
+    },
     CreationContext, Frame,
 };
+pub use egui::include_image;
 use error::ExecutionError;
 use output::Output;
 #[cfg(not(target_arch = "wasm32"))]
@@ -88,6 +92,12 @@ pub fn run_app_native(app: Command, settings: Settings, f: impl FnOnce(&ArgMatch
         // so it should be ok.
         let localization = Box::leak(Box::new(settings.localization));
 
+        let icon = settings.icon.map(|src| {
+            egui::Image::new(src)
+                .max_width(40.0)
+                .max_height(40.0)
+                .rounding(10.0)
+        });
         let mut klask = Klask {
             state: AppState::new(&app, localization, settings.prefer_long_about),
             tab: Tab::Arguments,
@@ -103,6 +113,7 @@ pub fn run_app_native(app: Command, settings: Settings, f: impl FnOnce(&ArgMatch
             custom_font: settings.custom_font,
             localization,
             style: settings.style,
+            icon,
             platform_state: Native {},
         };
         let native_options = eframe::NativeOptions::default();
@@ -197,6 +208,7 @@ where
         custom_font: settings.custom_font,
         localization,
         style: settings.style,
+        icon: settings.icon,
         platform_state: Wasm {
             fut_factory,
             // Init without logging so eframe's setup output is ignored. Library user can use [`Logger::set_max_level`] to change.
@@ -336,6 +348,8 @@ struct Klask<'s, PlatformState> {
     localization: &'s Localization,
     style: Style,
 
+    icon: Option<Image<'static>>,
+
     #[allow(dead_code)]
     platform_state: PlatformState,
 }
@@ -352,40 +366,53 @@ where
     Self: KlaskTrait<'s>,
 {
     fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
+        if self.icon.is_some() {
+            egui_extras::install_image_loaders(ctx);
+        }
         egui::CentralPanel::default().show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 // Tab selection
                 let tab_count =
                     1 + usize::from(self.env.is_some()) + usize::from(self.stdin.is_some());
+                // + usize::from(self.icon.is_some());
 
                 if tab_count > 1 {
-                    ui.columns(tab_count, |ui| {
-                        let mut index = 0;
-                        ui[index].selectable_value(
-                            &mut self.tab,
-                            Tab::Arguments,
-                            &self.localization.arguments,
-                        );
-                        index += 1;
+                    ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
+                        if let Some(icon) = self.icon.clone() {
+                            ui.add(icon);
+                        }
+                        ui.columns(tab_count, |ui| {
+                            let mut index = 0;
 
-                        if self.env.is_some() {
                             ui[index].selectable_value(
                                 &mut self.tab,
-                                Tab::Env,
-                                &self.localization.env_variables,
+                                Tab::Arguments,
+                                &self.localization.arguments,
                             );
                             index += 1;
-                        }
-                        if self.stdin.is_some() {
-                            ui[index].selectable_value(
-                                &mut self.tab,
-                                Tab::Stdin,
-                                &self.localization.input,
-                            );
-                        }
+
+                            if self.env.is_some() {
+                                ui[index].selectable_value(
+                                    &mut self.tab,
+                                    Tab::Env,
+                                    &self.localization.env_variables,
+                                );
+                                index += 1;
+                            }
+                            if self.stdin.is_some() {
+                                ui[index].selectable_value(
+                                    &mut self.tab,
+                                    Tab::Stdin,
+                                    &self.localization.input,
+                                );
+                            }
+                        });
                     });
 
                     ui.separator();
+                } else if let Some(icon) = self.icon.clone() {
+                    ui.add(icon);
+                    // ui.separator();
                 }
 
                 // Display selected tab
@@ -704,7 +731,6 @@ impl<'s> KlaskTrait<'s> for Klask<'s, Native> {
                             *path = file.to_string_lossy().into_owned();
                         }
                     }
-                    ui.text_edit_singleline(path);
                 });
             }
             StdinType::Text(text) => {

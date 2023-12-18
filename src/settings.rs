@@ -1,7 +1,7 @@
 // Structs are marked as `#[non_exhaustive]` to allow
 // to add other optionas alter withour breaking compatibility.
 
-use eframe::egui::{self, style::Spacing, Style};
+use eframe::egui::{self, style::Spacing, ImageSource, Style};
 use std::borrow::Cow;
 
 /// Settings for klask.
@@ -11,7 +11,7 @@ use std::borrow::Cow;
 /// let mut settings = Settings::default();
 /// settings.enable_env = Some("Description".into());
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct Settings {
     /// Pass None to disable. Pass Some with a description to enable.
@@ -38,6 +38,23 @@ pub struct Settings {
 
     /// Egui style used in GUI.
     pub style: Style,
+
+    /// Egui image to use as icon and logo placed at the top
+    /// to be passed to [`egui::widgets::ImageSource`]
+    pub icon: Option<ImageSource<'static>>,
+}
+
+impl PartialEq for Settings {
+    fn eq(&self, other: &Self) -> bool {
+        self.enable_env == other.enable_env
+            && self.enable_stdin == other.enable_stdin
+            && self.enable_working_dir == other.enable_working_dir
+            && self.custom_font == other.custom_font
+            && self.prefer_long_about == other.prefer_long_about
+            && self.localization == other.localization
+            && self.style == other.style
+            && self.icon.is_some() == other.icon.is_some()
+    }
 }
 
 impl Default for Settings {
@@ -57,6 +74,7 @@ impl Default for Settings {
                 },
                 ..Default::default()
             },
+            icon: None,
         }
     }
 }
